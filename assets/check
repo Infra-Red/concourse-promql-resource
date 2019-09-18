@@ -1,0 +1,62 @@
+#!/bin/bash -eu
+# vim: set ft=sh
+
+exec 3>&1 # make stdout available as fd 3 for the result
+exec 1>&2 # redirect all output to stderr for logging
+
+TMPDIR=${TMPDIR:-/tmp}
+
+function execute_query() {
+  http -b "${skip_ssl_verification}" $PROM_AUTH "${endpoint}/api/v1/query" query=="${query}"
+}
+
+payload=$(mktemp "$TMPDIR/promql-resource-request.XXXXXX")
+
+cat > "$payload" <&0
+
+endpoint=$(jq -r '.source.endpoint // ""' < "$payload")
+password=$(jq -r '.source.password // ""' < "$payload")
+query=$(jq -r '.source.query // ""' < "$payload")
+skip_ssl_verification=$(jq -r '.source.skip_ssl_verification // ""' < "$payload")
+username=$(jq -r '.source.username // ""' < "$payload")
+
+if [ -z "$endpoint" ]; then
+    echo >&2 "invalid payload (missing source.endpoint)"
+    exit 1
+fi
+
+if [ -z "$query" ]; then
+    echo >&2 "invalid payload (missing source.query)"
+    exit 1
+fi
+
+if [ -n "$skip_ssl_verification" ]; then
+    skip_ssl_verification="--verify=no"
+fi
+
+if [ -n "$username" ] && [ -n "$password" ] ; then
+    export PROM_AUTH="-a ${username}:${password}"
+else
+    export PROM_AUTH=""
+fi
+
+STATUS=$(http -h "${skip_ssl_verification}" $PROM_AUTH GET "${endpoint}/api/v1/status/config" 2>&1 | grep HTTP/  | cut -d ' ' -f 2)
+if [ "$STATUS" == "401" ]; then
+    echo >&2 "401 Authorization Required"
+    exit 1
+elif [ "$STATUS" != "200" ]; then
+    echo >&2 "received non 200 status code. status code: ${STATUS}"
+    exit 1
+fi
+
+last_ref=$(jq -r '.version.value // ""' < "$payload")
+new_ref="$(execute_query | jq -r '.data.result[0].value[1]' | sed 's/\..*//' | cut -b1-10)"
+timestamp="$(execute_query | jq -r '.data.result[0].value[0]' | sed 's/\..*//' | cut -b1-10)"
+
+if [[ "$new_ref" == "$last_ref" ]]; then
+  echo "[]" >&3
+else
+  jq -n "[
+    {\"value\": \"$new_ref\", \"timestamp\": \"$timestamp\"}
+  ]" >&3
+fi
