@@ -7,7 +7,7 @@ exec 1>&2 # redirect all output to stderr for logging
 TMPDIR=${TMPDIR:-/tmp}
 
 function execute_query() {
-  http -b "${skip_ssl_verification}" $PROM_AUTH "${endpoint}/api/v1/query" query=="${query}"
+  http -b $SKIP_SSL_VERIFICATION $PROM_AUTH "${endpoint}/api/v1/query" query=="${query}"
 }
 
 payload=$(mktemp "$TMPDIR/promql-resource-request.XXXXXX")
@@ -31,7 +31,9 @@ if [ -z "$query" ]; then
 fi
 
 if [ -n "$skip_ssl_verification" ]; then
-    skip_ssl_verification="--verify=no"
+    SKIP_SSL_VERIFICATION="--verify=no"
+else
+    SKIP_SSL_VERIFICATION=""
 fi
 
 if [ -n "$username" ] && [ -n "$password" ] ; then
@@ -40,7 +42,7 @@ else
     export PROM_AUTH=""
 fi
 
-STATUS=$(http -h "${skip_ssl_verification}" $PROM_AUTH GET "${endpoint}/api/v1/status/config" 2>&1 | grep HTTP/  | cut -d ' ' -f 2)
+STATUS=$(http -h $SKIP_SSL_VERIFICATION $PROM_AUTH GET "${endpoint}/api/v1/status/config" 2>&1 | grep HTTP/  | cut -d ' ' -f 2)
 if [ "$STATUS" == "401" ]; then
     echo >&2 "401 Authorization Required"
     exit 1
